@@ -14,7 +14,7 @@
     "name": "Pascal Senn",
     "url": "https://twitter.com/Pascal_Senn"
   },
-  "version": "0.0.3",
+  "version": "0.0.4",
   "icon": "logo.png",
   "engines": {
     "vscode": "^1.64.0"
