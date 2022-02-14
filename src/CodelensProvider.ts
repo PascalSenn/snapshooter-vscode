@@ -1,6 +1,10 @@
 import path = require("path");
 import * as vscode from "vscode";
 import { ViewColumn } from "vscode";
+import {
+  FailedSnapshotReporter,
+  ReportTestItem,
+} from "./FailedSnapshotReporter";
 
 export class CodelensProvider implements vscode.CodeLensProvider {
   private _onDidChangeCodeLenses: vscode.EventEmitter<void> =
@@ -8,7 +12,7 @@ export class CodelensProvider implements vscode.CodeLensProvider {
   public readonly onDidChangeCodeLenses: vscode.Event<void> =
     this._onDidChangeCodeLenses.event;
 
-  constructor() {
+  constructor(private readonly _reporter: FailedSnapshotReporter) {
     vscode.workspace.onDidChangeConfiguration((_) => {
       this._onDidChangeCodeLenses.fire();
     });
@@ -46,6 +50,7 @@ export class CodelensProvider implements vscode.CodeLensProvider {
     const missmatchPattern = `${directoryPath}/__snapshots__/__mismatch__/${basename}*.snap`;
 
     const snapshots = await this._readMethodsOfFile(snapshotsPattern);
+    const testItems: ReportTestItem[] = [];
     if (snapshots && snapshots.length > 0) {
       const missmatches = new Set(
         await this._readMethodsOfFile(missmatchPattern)
@@ -69,6 +74,13 @@ export class CodelensProvider implements vscode.CodeLensProvider {
               this._createPeekCodeLens(range, document, position, snapshotFile)
             );
             if (hasMissmatch) {
+              testItems.push({
+                missmatchFile,
+                snapshotFile,
+                methodName,
+                testFile: document.uri.path,
+                testFileRange: range,
+              });
               codeLenses.push(
                 ...[
                   this._createDiffCodeLens(range, snapshotFile, missmatchFile),
@@ -84,6 +96,7 @@ export class CodelensProvider implements vscode.CodeLensProvider {
         }
       }
     }
+    await this._reporter.reportErrors(testItems);
 
     return codeLenses;
   }
@@ -104,7 +117,6 @@ export class CodelensProvider implements vscode.CodeLensProvider {
     position: vscode.Position,
     snapshotFile: string
   ) {
-    console.log({ snapshotFile });
     let codeLens = new vscode.CodeLens(range);
     codeLens.command = {
       title: "$(eye) Peek",
