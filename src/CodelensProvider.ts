@@ -2,9 +2,6 @@ import path = require("path");
 import * as vscode from "vscode";
 import { ViewColumn } from "vscode";
 
-/**
- * CodelensProvider
- */
 export class CodelensProvider implements vscode.CodeLensProvider {
   private _onDidChangeCodeLenses: vscode.EventEmitter<void> =
     new vscode.EventEmitter<void>();
