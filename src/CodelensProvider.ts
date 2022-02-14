@@ -1,10 +1,7 @@
 import path = require("path");
 import * as vscode from "vscode";
 import { ViewColumn } from "vscode";
-import {
-  FailedSnapshotReporter,
-  ReportTestItem,
-} from "./FailedSnapshotReporter";
+import { commands } from "./commands";
 
 export class CodelensProvider implements vscode.CodeLensProvider {
   private _onDidChangeCodeLenses: vscode.EventEmitter<void> =
@@ -12,7 +9,7 @@ export class CodelensProvider implements vscode.CodeLensProvider {
   public readonly onDidChangeCodeLenses: vscode.Event<void> =
     this._onDidChangeCodeLenses.event;
 
-  constructor(private readonly _reporter: FailedSnapshotReporter) {
+  constructor() {
     vscode.workspace.onDidChangeConfiguration((_) => {
       this._onDidChangeCodeLenses.fire();
     });
@@ -50,55 +47,70 @@ export class CodelensProvider implements vscode.CodeLensProvider {
     const missmatchPattern = `${directoryPath}/__snapshots__/__mismatch__/${basename}*.snap`;
 
     const snapshots = await this._readMethodsOfFile(snapshotsPattern);
-    const testItems: ReportTestItem[] = [];
-    if (snapshots && snapshots.length > 0) {
-      const missmatches = new Set(
-        await this._readMethodsOfFile(missmatchPattern)
-      );
-      const text = document.getText();
-      for (const methodName of snapshots) {
-        const methodNameRegex = new RegExp(`${methodName}\\(`);
-        let matches = methodNameRegex.exec(text);
-        if (matches) {
-          const line = document.lineAt(document.positionAt(matches.index).line);
-          const indexOf = line.text.indexOf(matches[0]);
-          const position = new vscode.Position(line.lineNumber, indexOf);
-          const range = document.getWordRangeAtPosition(position);
-          if (range) {
-            const hasMissmatch = missmatches.has(methodName);
-            const fullPath = path.dirname(document.uri.path);
-            const snapshotFile = `${fullPath}/__snapshots__/${basename}.${methodName}.snap`;
-            const missmatchFile = `${fullPath}/__snapshots__/__mismatch__/${basename}.${methodName}.snap`;
+    if (!snapshots || snapshots.length === 0) {
+      return codeLenses;
+    }
 
-            codeLenses.push(
-              this._createPeekCodeLens(range, document, position, snapshotFile)
-            );
-            if (hasMissmatch) {
-              testItems.push({
-                missmatchFile,
+    const missmatches = new Set(
+      await this._readMethodsOfFile(missmatchPattern)
+    );
+
+    const documentContent = document.getText();
+
+    for (const methodName of snapshots) {
+      const searchResult = await this._searchMethodInDocument(
+        document,
+        documentContent,
+        methodName
+      );
+      if (searchResult) {
+        const { range, position } = searchResult;
+        const hasMissmatch = missmatches.has(methodName);
+        const fullPath = path.dirname(document.uri.path);
+        const snapshotFile = `${fullPath}/__snapshots__/${basename}.${methodName}.snap`;
+        const missmatchFile = `${fullPath}/__snapshots__/__mismatch__/${basename}.${methodName}.snap`;
+
+        codeLenses.push(
+          this._createPeekCodeLens(range, document, position, snapshotFile)
+        );
+        if (hasMissmatch) {
+          codeLenses.push(
+            ...[
+              this._createDiffCodeLens(range, snapshotFile, missmatchFile),
+              this._createPeekDiff(
+                range,
                 snapshotFile,
                 methodName,
-                testFile: document.uri.path,
-                testFileRange: range,
-              });
-              codeLenses.push(
-                ...[
-                  this._createDiffCodeLens(range, snapshotFile, missmatchFile),
-                  this._createAcceptCodeLens(
-                    range,
-                    missmatchFile,
-                    snapshotFile
-                  ),
-                ]
-              );
-            }
-          }
+                document,
+                missmatchFile
+              ),
+              this._createAcceptCodeLens(range, missmatchFile, snapshotFile),
+            ]
+          );
         }
       }
     }
-    await this._reporter.reportErrors(testItems);
 
     return codeLenses;
+  }
+
+  private async _searchMethodInDocument(
+    document: vscode.TextDocument,
+    content: string,
+    methodName: string
+  ) {
+    const methodNameRegex = new RegExp(`${methodName}\\(`);
+    let matches = methodNameRegex.exec(content);
+    if (matches) {
+      const line = document.lineAt(document.positionAt(matches.index).line);
+      const indexOf = line.text.indexOf(matches[0]);
+      const position = new vscode.Position(line.lineNumber, indexOf);
+      const range = document.getWordRangeAtPosition(position);
+      if (range) {
+        return { range, position };
+      }
+    }
+    return undefined;
   }
 
   private async _readMethodsOfFile(pattern: string): Promise<string[]> {
@@ -144,11 +156,10 @@ export class CodelensProvider implements vscode.CodeLensProvider {
     missmatchFile: string,
     snapshotFile: string
   ) {
-    console.log({ missmatchFile, snapshotFile });
     let accept = new vscode.CodeLens(range);
     accept.command = {
       title: "$(check) Accept",
-      command: "snapshooter.accept",
+      command: commands.snapshooter.accept,
       arguments: [
         vscode.Uri.file(missmatchFile),
         vscode.Uri.file(snapshotFile),
@@ -165,7 +176,7 @@ export class CodelensProvider implements vscode.CodeLensProvider {
   ) {
     let diffCodeLens = new vscode.CodeLens(range);
     diffCodeLens.command = {
-      title: "$(compare-changes) Diff",
+      title: "$(open-preview) Diff",
       command: "vscode.diff",
       arguments: [
         vscode.Uri.file(snapshotFile),
@@ -179,5 +190,29 @@ export class CodelensProvider implements vscode.CodeLensProvider {
       ],
     };
     return diffCodeLens;
+  }
+
+  private _createPeekDiff(
+    range: vscode.Range,
+    snapshotFile: string,
+    methodName: string,
+    testFile: vscode.TextDocument,
+    missmatchFile: string
+  ) {
+    let peekMissmatch = new vscode.CodeLens(range);
+    peekMissmatch.command = {
+      title: "$(eye) Peek Diff",
+      command: commands.snapshooter.peekMissmatch,
+      arguments: [
+        {
+          missmatchFile,
+          snapshotFile,
+          methodName,
+          testFile: testFile.uri.path,
+          testFileRange: range,
+        },
+      ],
+    };
+    return peekMissmatch;
   }
 }
