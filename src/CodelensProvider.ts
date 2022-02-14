@@ -104,7 +104,6 @@ export class CodelensProvider implements vscode.CodeLensProvider {
     position: vscode.Position,
     snapshotFile: string
   ) {
-    console.log({ snapshotFile });
     let codeLens = new vscode.CodeLens(range);
     codeLens.command = {
       title: "$(eye) Peek",
@@ -132,7 +131,6 @@ export class CodelensProvider implements vscode.CodeLensProvider {
     missmatchFile: string,
     snapshotFile: string
   ) {
-    console.log({ missmatchFile, snapshotFile });
     let accept = new vscode.CodeLens(range);
     accept.command = {
       title: "$(check) Accept",
