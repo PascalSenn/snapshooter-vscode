@@ -1,6 +1,6 @@
 # Snapshooter VSCode
 
-![Logo](/img/logo.png)
+![Logo](/logo.png)
 
 Provides Code Lens for [Snapshooter](https://swisslife-oss.github.io/snapshooter/).
 
@@ -12,12 +12,12 @@ Provides Code Lens for [Snapshooter](https://swisslife-oss.github.io/snapshooter
 # Screenshots
 
 ## Operations
-![Operations](/img/operations.png)
+![Operations](/operations.png)
 
 ## Peek
-![Operations](/img/peek.png)
+![Operations](/peek.png)
 
 ## Diff
-![Operations](/img/diff.png)
+![Operations](/diff.png)
 
-Twitter [@Pascal_Senn](https://twitter.com/Pascal_Senn);
+Twitter [@Pascal_Senn](https://twitter.com/Pascal_Senn)
