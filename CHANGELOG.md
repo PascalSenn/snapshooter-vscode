@@ -4,6 +4,7 @@ All notable changes to the "snapshooter-vscode" extension will be documented in 
 
 ## [0.0.4]
 
+- Add Error Peek view 
 - Remove Console logs
 
 ## [0.0.3]

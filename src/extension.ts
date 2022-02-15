@@ -10,12 +10,14 @@ export function activate(context: vscode.ExtensionContext) {
     "Failed Snapshots"
   );
   const reporter = new FailedSnapshotReporter(controller);
-  const codelensProvider = new CodelensProvider();
+  const codelensProvider = new CodelensProvider(reporter);
+
   const snapshooterAccept = vscode.commands.registerCommand(
     commands.snapshooter.accept,
     async (from, to, eventEmitter) => {
       await vscode.workspace.fs.copy(from, to, { overwrite: true });
       await vscode.workspace.fs.delete(from);
+      reporter.clear();
       eventEmitter.fire();
     }
   );
@@ -28,6 +30,7 @@ export function activate(context: vscode.ExtensionContext) {
 
   disposables.push(
     vscode.Disposable.from(reporter),
+    vscode.Disposable.from(codelensProvider),
     vscode.languages.registerCodeLensProvider("csharp", codelensProvider),
     controller,
     snapshooterAccept,

@@ -2,17 +2,37 @@ import path = require("path");
 import * as vscode from "vscode";
 import { ViewColumn } from "vscode";
 import { commands } from "./commands";
+import { FailedSnapshotReporter } from "./FailedSnapshotReporter";
 
 export class CodelensProvider implements vscode.CodeLensProvider {
-  private _onDidChangeCodeLenses: vscode.EventEmitter<void> =
+  private readonly _disposables: vscode.Disposable[] = [];
+  private readonly _onDidChangeCodeLenses: vscode.EventEmitter<void> =
     new vscode.EventEmitter<void>();
   public readonly onDidChangeCodeLenses: vscode.Event<void> =
     this._onDidChangeCodeLenses.event;
 
-  constructor() {
-    vscode.workspace.onDidChangeConfiguration((_) => {
+  constructor(private readonly _reporter: FailedSnapshotReporter) {
+    const notifyCodeLensChange = debounce((e: any) => {
       this._onDidChangeCodeLenses.fire();
-    });
+    }, 100);
+
+    const watchChange =
+      vscode.workspace.onDidChangeConfiguration(notifyCodeLensChange);
+
+    const snapshotWatcher =
+      vscode.workspace.createFileSystemWatcher("**/*.snap");
+
+    const snapshotChanged = snapshotWatcher.onDidChange(notifyCodeLensChange);
+    const snapshotDeleted = snapshotWatcher.onDidDelete(notifyCodeLensChange);
+    const snapshotCreated = snapshotWatcher.onDidCreate(notifyCodeLensChange);
+
+    this._disposables.push(
+      watchChange,
+      snapshotWatcher,
+      snapshotChanged,
+      snapshotCreated,
+      snapshotDeleted
+    );
   }
 
   public provideCodeLenses(
@@ -27,6 +47,10 @@ export class CodelensProvider implements vscode.CodeLensProvider {
     token: vscode.CancellationToken
   ) {
     return codeLens;
+  }
+
+  public dispose() {
+    this._disposables.forEach((x) => x.dispose());
   }
 
   private async provideCodeLensesAsync(
@@ -57,6 +81,8 @@ export class CodelensProvider implements vscode.CodeLensProvider {
 
     const documentContent = document.getText();
 
+    let isMissmatchStillThere = false;
+
     for (const methodName of snapshots) {
       const searchResult = await this._searchMethodInDocument(
         document,
@@ -70,25 +96,28 @@ export class CodelensProvider implements vscode.CodeLensProvider {
         const snapshotFile = `${fullPath}/__snapshots__/${basename}.${methodName}.snap`;
         const missmatchFile = `${fullPath}/__snapshots__/__mismatch__/${basename}.${methodName}.snap`;
 
-        codeLenses.push(
-          this._createPeekCodeLens(range, document, position, snapshotFile)
-        );
         if (hasMissmatch) {
+          isMissmatchStillThere ||= this._reporter.isActiveTest(missmatchFile);
           codeLenses.push(
-            ...[
-              this._createDiffCodeLens(range, snapshotFile, missmatchFile),
-              this._createPeekDiff(
-                range,
-                snapshotFile,
-                methodName,
-                document,
-                missmatchFile
-              ),
-              this._createAcceptCodeLens(range, missmatchFile, snapshotFile),
-            ]
+            this._createPeekDiffCodeLens(
+              range,
+              snapshotFile,
+              document,
+              missmatchFile
+            ),
+            this._createDiffCodeLens(range, snapshotFile, missmatchFile),
+            this._createAcceptCodeLens(range, missmatchFile, snapshotFile)
+          );
+        } else {
+          codeLenses.push(
+            this._createPeekCodeLens(range, document, position, snapshotFile)
           );
         }
       }
+    }
+
+    if (!isMissmatchStillThere && this._reporter.isErrorReported()) {
+      this._reporter.clear();
     }
 
     return codeLenses;
@@ -129,7 +158,7 @@ export class CodelensProvider implements vscode.CodeLensProvider {
     position: vscode.Position,
     snapshotFile: string
   ) {
-    let codeLens = new vscode.CodeLens(range);
+    const codeLens = new vscode.CodeLens(range);
     codeLens.command = {
       title: "$(eye) Peek",
       command: "editor.action.peekLocations",
@@ -156,8 +185,8 @@ export class CodelensProvider implements vscode.CodeLensProvider {
     missmatchFile: string,
     snapshotFile: string
   ) {
-    let accept = new vscode.CodeLens(range);
-    accept.command = {
+    const codeLens = new vscode.CodeLens(range);
+    codeLens.command = {
       title: "$(check) Accept",
       command: commands.snapshooter.accept,
       arguments: [
@@ -166,7 +195,7 @@ export class CodelensProvider implements vscode.CodeLensProvider {
         this._onDidChangeCodeLenses,
       ],
     };
-    return accept;
+    return codeLens;
   }
 
   private _createDiffCodeLens(
@@ -174,8 +203,8 @@ export class CodelensProvider implements vscode.CodeLensProvider {
     snapshotFile: string,
     missmatchFile: string
   ) {
-    let diffCodeLens = new vscode.CodeLens(range);
-    diffCodeLens.command = {
+    const codeLens = new vscode.CodeLens(range);
+    codeLens.command = {
       title: "$(open-preview) Diff",
       command: "vscode.diff",
       arguments: [
@@ -189,30 +218,43 @@ export class CodelensProvider implements vscode.CodeLensProvider {
         },
       ],
     };
-    return diffCodeLens;
+    return codeLens;
   }
 
-  private _createPeekDiff(
+  private _createPeekDiffCodeLens(
     range: vscode.Range,
     snapshotFile: string,
-    methodName: string,
     testFile: vscode.TextDocument,
     missmatchFile: string
   ) {
-    let peekMissmatch = new vscode.CodeLens(range);
-    peekMissmatch.command = {
-      title: "$(eye) Peek Diff",
+    const codeLens = new vscode.CodeLens(range);
+    codeLens.command = {
+      title: "$(eye) Peek",
       command: commands.snapshooter.peekMissmatch,
       arguments: [
         {
           missmatchFile,
           snapshotFile,
-          methodName,
           testFile: testFile.uri.path,
           testFileRange: range,
         },
       ],
     };
-    return peekMissmatch;
+    return codeLens;
   }
 }
+
+const debounce = (func: Function, wait: number) => {
+  let timeout: any;
+
+  return function executedFunction(...args: any[]) {
+    const later = () => {
+      timeout = null;
+
+      func(...args);
+    };
+
+    clearTimeout(timeout);
+    timeout = setTimeout(later, wait);
+  };
+};
